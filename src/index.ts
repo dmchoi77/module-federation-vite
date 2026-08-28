@@ -2,7 +2,14 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { createRequire } from 'module';
 import * as path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'url';
-import type { ConfigEnv, EnvironmentOptions, Plugin, ResolvedConfig, UserConfig } from 'vite';
+import type {
+  ConfigEnv,
+  EnvironmentOptions,
+  Plugin,
+  ResolvedConfig,
+  UserConfig,
+  ViteDevServer,
+} from 'vite';
 import { version as viteVersion } from 'vite';
 import addEntry, { getBuildInput } from './plugins/pluginAddEntry';
 import { checkAliasConflicts } from './plugins/pluginCheckAliasConflicts';
@@ -103,6 +110,7 @@ import {
   materializeCachedLoadShareModule,
   prependWorkspaceSingletonSsrImport,
   resetConcreteSharedImportSourceCache,
+  resetSharedExportsCache,
   writeLoadShareModule,
   writePreBuildLibPath,
 } from './virtualModules/virtualShared_preBuild';
@@ -1235,6 +1243,15 @@ function federation(mfUserOptions: ModuleFederationOptions): any[] {
           return;
         }
         return virtualModule.code;
+      },
+      configureServer(server: ViteDevServer) {
+        // Re-scan workspace export graphs after source changes so HMR sees new exports.
+        const invalidateSharedExportsCache = (file: string) => {
+          if (!file.includes('node_modules')) resetSharedExportsCache();
+        };
+        server.watcher.on('change', invalidateSharedExportsCache);
+        server.watcher.on('add', invalidateSharedExportsCache);
+        server.watcher.on('unlink', invalidateSharedExportsCache);
       },
     },
     ...(options.experiments.externalRuntime ? [pluginExternalRuntimeCore()] : []),

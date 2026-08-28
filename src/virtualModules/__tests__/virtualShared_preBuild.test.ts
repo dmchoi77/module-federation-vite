@@ -537,7 +537,11 @@ vi.mock('fs', () => ({
       filePath.endsWith('/repo/packages/typed-destructuring.ts') ||
       filePath.endsWith('/repo/packages/decorated-export.ts') ||
       filePath.endsWith('/repo/packages/export-import-alias.ts') ||
-      filePath.endsWith('/repo/packages/custom-shared-source/index.ts')
+      filePath.endsWith('/repo/packages/custom-shared-source/index.ts') ||
+      filePath.endsWith('/repo/packages/custom-shared-source-cache/index.ts') ||
+      filePath.endsWith('/repo/packages/custom-shared-source-cache/feature.ts') ||
+      filePath.endsWith('/repo/packages/custom-shared-source-missing/index.ts') ||
+      filePath.endsWith('/repo/packages/custom-shared-source-conditions/index.ts')
     );
   }),
   readFileSync: vi.fn((filePath: string) => {
@@ -931,6 +935,18 @@ export const [firstItem, ...restItems] = tuple;`;
               export function useSharedFeature() {
                 return sharedValue;
               }`;
+    }
+    if (filePath.endsWith('/repo/packages/custom-shared-source-cache/index.ts')) {
+      return "export * from './feature';";
+    }
+    if (filePath.endsWith('/repo/packages/custom-shared-source-cache/feature.ts')) {
+      return `export const sharedValue = 'shared';
+              export function useSharedFeature() {
+                return sharedValue;
+              }`;
+    }
+    if (filePath.endsWith('/repo/packages/custom-shared-source-conditions/index.ts')) {
+      return "export * from 'mock-package-browser-conditional';";
     }
     if (filePath.endsWith('/mock-package-browser-esm-internal-cjs/index.js')) {
       return `const internalModule = { exports: {} };
@@ -2723,6 +2739,90 @@ describe('writeLoadShareModule', () => {
 
   it('detects named exports when `export` appears as a method name', () => {
     expect(getSharedNamedExports('mock-package-export-method-call')).toEqual(['toJwk']);
+  });
+
+  it('memoizes repeated scans for a configured workspace source barrel', () => {
+    const readFileSyncMock = vi.mocked(readFileSync);
+    readFileSyncMock.mockClear();
+    const shareItem = {
+      name: 'custom-shared-source',
+      from: '',
+      version: undefined,
+      shareConfig: {
+        import: '/repo/packages/custom-shared-source-cache/index.ts',
+        singleton: true,
+        strictVersion: false,
+        requiredVersion: '*',
+      },
+      scope: 'default',
+    } as ShareItem;
+
+    expect(getSharedNamedExports('custom-shared-source', shareItem)).toEqual([
+      'sharedValue',
+      'useSharedFeature',
+    ]);
+    expect(getSharedNamedExports('custom-shared-source', shareItem)).toEqual([
+      'sharedValue',
+      'useSharedFeature',
+    ]);
+
+    expect(
+      readFileSyncMock.mock.calls.filter(([filePath]) =>
+        String(filePath).includes('/repo/packages/custom-shared-source-cache/')
+      )
+    ).toHaveLength(2);
+  });
+
+  it('memoizes failed shared export inspections', () => {
+    const readFileSyncMock = vi.mocked(readFileSync);
+    readFileSyncMock.mockClear();
+    const shareItem = {
+      name: 'custom-shared-source-missing',
+      from: '',
+      version: undefined,
+      shareConfig: {
+        import: '/repo/packages/custom-shared-source-missing/index.ts',
+        singleton: true,
+        strictVersion: false,
+        requiredVersion: '*',
+      },
+      scope: 'default',
+    } as ShareItem;
+
+    expect(getSharedNamedExports('custom-shared-source-missing', shareItem)).toBeUndefined();
+    expect(getSharedNamedExports('custom-shared-source-missing', shareItem)).toBeUndefined();
+
+    expect(
+      readFileSyncMock.mock.calls.filter(([filePath]) =>
+        String(filePath).endsWith('/repo/packages/custom-shared-source-missing/index.ts')
+      )
+    ).toHaveLength(1);
+  });
+
+  it('keeps shared export inspection caches separate by export conditions', () => {
+    const shareItem = {
+      name: 'custom-shared-source-conditions',
+      from: '',
+      version: undefined,
+      shareConfig: {
+        import: '/repo/packages/custom-shared-source-conditions/index.ts',
+        singleton: true,
+        strictVersion: false,
+        requiredVersion: '*',
+      },
+      scope: 'default',
+    } as ShareItem;
+
+    expect(getSharedNamedExports('custom-shared-source-conditions', shareItem)).toEqual([
+      'clientOnly',
+    ]);
+    expect(
+      getSharedNamedExports('custom-shared-source-conditions', shareItem, [
+        'node',
+        'import',
+        'default',
+      ])
+    ).toEqual(['serverOnly']);
   });
 
   it('uses worker conditional exports for webworker SSR', () => {

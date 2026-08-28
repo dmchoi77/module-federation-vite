@@ -109,6 +109,11 @@ type SharedExportInspection = {
 type CachedNamedExports = { value: string[] | undefined };
 
 const packageNamedExportsCache = new Map<string, CachedNamedExports>();
+const inspectSharedExportsCache = new Map<string, SharedExportInspection | undefined>();
+
+export function resetSharedExportsCache() {
+  inspectSharedExportsCache.clear();
+}
 
 type NamedExportScanState = {
   complete: boolean;
@@ -157,8 +162,16 @@ function inspectSharedExportsFromFile(
   entryPath: string | undefined,
   exportConditions = DEFAULT_SHARED_EXPORT_CONDITIONS
 ): SharedExportInspection | undefined {
+  if (!entryPath) return undefined;
+
+  // Cache the recursive export scan per entry and condition set.
+  const cacheKey = `${entryPath}\0${exportConditions.join('\0')}`;
+  if (inspectSharedExportsCache.has(cacheKey)) {
+    return inspectSharedExportsCache.get(cacheKey);
+  }
+
+  let result: SharedExportInspection | undefined;
   try {
-    if (!entryPath) return undefined;
     const source = readFileSync(entryPath, 'utf-8');
     const scanState: NamedExportScanState = { complete: true };
     const namedExports = getNamedExportsViaRegex(
@@ -169,15 +182,19 @@ function inspectSharedExportsFromFile(
       exportConditions
     );
     const commonJs = hasCommonJsExports(source);
-    return {
+    result = {
       // A complete empty ESM scan is a known default-only export surface. Keep
       // unresolved re-exports and CommonJS sources conservative instead.
       namedExports: scanState.complete && !commonJs ? namedExports : undefined,
       commonJs,
     };
   } catch {
-    return undefined;
+    result = undefined;
   }
+
+  // Cache failures too to avoid retrying once per import site.
+  inspectSharedExportsCache.set(cacheKey, result);
+  return result;
 }
 
 function getMutableExportsFromFile(

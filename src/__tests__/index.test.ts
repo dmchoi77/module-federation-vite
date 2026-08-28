@@ -18,11 +18,13 @@ import type {
   ModuleFederationOptions,
   NormalizedModuleFederationOptions,
   PluginManifestOptions,
+  ShareItem,
 } from '../utils/normalizeModuleFederationOptions';
 import { toViteEncodedId } from '../utils/VirtualModule';
 import {
   getLoadShareImportId,
   getLoadShareModulePath,
+  getSharedNamedExports,
 } from '../virtualModules/virtualShared_preBuild';
 
 const { getSharedExportConditionsMock, hasPackageDependencyMock, mfWarn } = vi.hoisted(() => ({
@@ -412,6 +414,57 @@ describe('virtual module resolution', () => {
     expect(callHook(virtualModulesPlugin.load, context, `\0${staleId}`)).toBe(
       callHook(virtualModulesPlugin.load, context, `\0${currentId}`)
     );
+  });
+
+  it('invalidates shared export inspection when a workspace barrel changes', () => {
+    const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'vite-mf-1150-'));
+    const entryPath = path.join(fixtureRoot, 'index.ts');
+    const leafPath = path.join(fixtureRoot, 'feature.ts');
+    const shareItem = {
+      name: 'workspace-cache-repro',
+      from: '',
+      version: undefined,
+      shareConfig: {
+        import: entryPath,
+        singleton: true,
+        strictVersion: false,
+        requiredVersion: '*',
+      },
+      scope: 'default',
+    } as ShareItem;
+
+    try {
+      writeFileSync(entryPath, "export * from './feature';\n");
+      writeFileSync(leafPath, 'export const before = 1;\n');
+
+      expect(getSharedNamedExports('workspace-cache-repro', shareItem)).toEqual(['before']);
+      writeFileSync(leafPath, 'export const after = 1;\n');
+      expect(getSharedNamedExports('workspace-cache-repro', shareItem)).toEqual(['before']);
+
+      const watcherHandlers = new Map<string, (file: string) => void>();
+      const plugin = getVirtualModulesPlugin();
+      if (!plugin.configureServer)
+        throw new Error('virtual modules configureServer hook not found');
+      callHook(
+        plugin.configureServer,
+        {} as MinimalPluginContextWithoutEnvironment,
+        {
+          watcher: {
+            on: vi.fn((event: string, handler: (file: string) => void) => {
+              watcherHandlers.set(event, handler);
+            }),
+          },
+        } as any
+      );
+
+      watcherHandlers.get('change')?.(path.join(fixtureRoot, 'node_modules', 'dependency.js'));
+      expect(getSharedNamedExports('workspace-cache-repro', shareItem)).toEqual(['before']);
+
+      watcherHandlers.get('change')?.(leafPath);
+      expect(getSharedNamedExports('workspace-cache-repro', shareItem)).toEqual(['after']);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
   });
 });
 
