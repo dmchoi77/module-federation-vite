@@ -52,6 +52,7 @@ import { getIgnoredOptionWarning } from './utils/hostProvidesAllShared';
 import { createModuleFederationError, mfWarn } from './utils/logger';
 import { getSharedExportConditions } from './utils/sharedExportConditions';
 import { getSharedRequest, getSharedRuntimeKey } from './utils/sharedKeyMatcher';
+import { createSharedOptimizerPlan } from './utils/sharedOptimizerPlan';
 import type {
   ModuleFederationOptions,
   NormalizedModuleFederationOptions,
@@ -523,11 +524,6 @@ function includeLinkedSharedEntries(
 
   for (const entry of additions) entries.add(entry);
   optimizeDeps.entries = [...entries];
-}
-
-function stabilizeOptimizeDeps(optimizeDeps: NonNullable<UserConfig['optimizeDeps']>): void {
-  optimizeDeps.include = [...new Set(optimizeDeps.include ?? [])].sort();
-  optimizeDeps.exclude = [...new Set(optimizeDeps.exclude ?? [])].sort();
 }
 
 function isFile(candidate: string): boolean {
@@ -1023,7 +1019,15 @@ export default __mfShared.default ?? __mfShared;`,
           options.exposes,
           config.build?.outDir ?? 'dist'
         );
-        stabilizeOptimizeDeps(config.optimizeDeps);
+        const plan = createSharedOptimizerPlan({
+          user: {
+            include: config.optimizeDeps.include,
+            exclude: config.optimizeDeps.exclude,
+          },
+          defaultEntries: [],
+        });
+        config.optimizeDeps.include = plan.include;
+        config.optimizeDeps.exclude = plan.exclude;
       }
     },
 
