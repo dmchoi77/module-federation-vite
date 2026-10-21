@@ -2060,6 +2060,7 @@ describe('vite:module-federation-early-init', () => {
       },
     };
 
+    mfWarn.mockClear();
     runConfig(plugin, { meta: {} } as ConfigPluginContext, config, {
       command: 'serve',
       mode: 'test',
@@ -2067,6 +2068,9 @@ describe('vite:module-federation-early-init', () => {
 
     expect(config.optimizeDeps.include).toEqual([...new Set(config.optimizeDeps.include)].sort());
     expect(config.optimizeDeps.exclude).toEqual(['a-first', 'remoteApp']);
+    expect(mfWarn).toHaveBeenCalledWith(
+      expect.stringContaining('[MF-VITE-OPTIMIZE-DEPS-CONFLICT] vue')
+    );
   });
 
   it('adds federation generated files to dev server watch ignores in serve', () => {

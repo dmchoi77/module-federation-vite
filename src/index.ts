@@ -52,7 +52,10 @@ import { getIgnoredOptionWarning } from './utils/hostProvidesAllShared';
 import { createModuleFederationError, mfWarn } from './utils/logger';
 import { getSharedExportConditions } from './utils/sharedExportConditions';
 import { getSharedRequest, getSharedRuntimeKey } from './utils/sharedKeyMatcher';
-import { createSharedOptimizerPlan } from './utils/sharedOptimizerPlan';
+import {
+  createSharedOptimizerPlan,
+  getSharedOptimizerPlanDiagnostics,
+} from './utils/sharedOptimizerPlan';
 import type {
   ModuleFederationOptions,
   NormalizedModuleFederationOptions,
@@ -681,10 +684,18 @@ function createEarlyVirtualModulesPlugin(options: NormalizedModuleFederationOpti
   const { shared, remotes } = options;
   const isLitShare = (pkg: string) => pkg === 'lit' || pkg.startsWith('lit/');
   let hasClientJsxSource = false;
+  const emittedOptimizerDiagnostics = new Set<string>();
   return {
     name: 'vite:module-federation-early-init',
     enforce: 'pre',
     config(config: UserConfig, { command: _command }) {
+      const userOptimizeDeps =
+        _command === 'serve'
+          ? {
+              include: config.optimizeDeps?.include ? [...config.optimizeDeps.include] : undefined,
+              exclude: config.optimizeDeps?.exclude ? [...config.optimizeDeps.exclude] : undefined,
+            }
+          : undefined;
       if (_command === 'serve') ignoreFederationGeneratedFiles(config, options);
 
       const root = config.root || process.cwd();
@@ -1016,6 +1027,20 @@ export default __mfShared.default ?? __mfShared;`,
         config.optimizeDeps.exclude = plan.exclude;
         if (generatedEntries.length > 0 && plan.entries) {
           config.optimizeDeps.entries = plan.entries;
+        }
+        if (userOptimizeDeps) {
+          for (const diagnostic of getSharedOptimizerPlanDiagnostics({
+            user: userOptimizeDeps,
+            defaultEntries: [],
+          })) {
+            const key = `${diagnostic.code}:${diagnostic.dependencies.join(',')}`;
+            if (emittedOptimizerDiagnostics.has(key)) continue;
+            emittedOptimizerDiagnostics.add(key);
+            mfWarn(
+              `[${diagnostic.code}] ${diagnostic.dependencies.join(', ')} is present in both ` +
+                '`optimizeDeps.include` and `optimizeDeps.exclude`; Vite keeps the include entry.'
+            );
+          }
         }
       }
     },
