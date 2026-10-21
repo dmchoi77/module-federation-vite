@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { createSharedOptimizerPlan } from '../sharedOptimizerPlan';
+import {
+  createSharedOptimizerPlan,
+  getSharedOptimizerPlanDiagnostics,
+} from '../sharedOptimizerPlan';
 
 describe('createSharedOptimizerPlan', () => {
   it('deduplicates and sorts include and exclude values', () => {
@@ -74,5 +77,47 @@ describe('createSharedOptimizerPlan', () => {
     } as const;
 
     expect(createSharedOptimizerPlan(input)).toEqual(createSharedOptimizerPlan(input));
+  });
+
+  it('reports include and exclude conflicts without changing the plan', () => {
+    expect(
+      getSharedOptimizerPlanDiagnostics({
+        user: {
+          include: ['react', 'vue'],
+          exclude: ['vue', 'remoteApp'],
+        },
+        defaultEntries: [],
+      })
+    ).toEqual([
+      {
+        code: 'MF-VITE-OPTIMIZE-DEPS-CONFLICT',
+        dependencies: ['vue'],
+      },
+    ]);
+  });
+
+  it('reports conflicts across user and generated optimizer inputs', () => {
+    expect(
+      getSharedOptimizerPlanDiagnostics({
+        user: { include: ['react'] },
+        generated: { exclude: ['react'] },
+        defaultEntries: [],
+      })
+    ).toEqual([
+      {
+        code: 'MF-VITE-OPTIMIZE-DEPS-CONFLICT',
+        dependencies: ['react'],
+      },
+    ]);
+  });
+
+  it('does not report diagnostics when optimizer inputs do not overlap', () => {
+    expect(
+      getSharedOptimizerPlanDiagnostics({
+        user: { include: ['react'], exclude: ['vue'] },
+        generated: { include: ['lit'], exclude: ['remoteApp'] },
+        defaultEntries: [],
+      })
+    ).toEqual([]);
   });
 });

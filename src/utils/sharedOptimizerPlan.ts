@@ -16,6 +16,11 @@ export interface SharedOptimizerPlan {
   entries?: string[];
 }
 
+export interface SharedOptimizerPlanDiagnostic {
+  code: 'MF-VITE-OPTIMIZE-DEPS-CONFLICT';
+  dependencies: string[];
+}
+
 function normalizeEntries(entries: string | readonly string[] | undefined): string[] {
   if (entries === undefined) return [];
   return typeof entries === 'string' ? [entries] : [...entries];
@@ -57,4 +62,22 @@ export function createSharedOptimizerPlan({
     exclude: uniqueSorted([...(user.exclude ?? []), ...(generated?.exclude ?? [])]),
     ...(entries === undefined ? {} : { entries }),
   };
+}
+
+export function getSharedOptimizerPlanDiagnostics({
+  user,
+  generated,
+}: SharedOptimizerPlanInput): SharedOptimizerPlanDiagnostic[] {
+  const include = new Set([...(user.include ?? []), ...(generated?.include ?? [])]);
+  const exclude = new Set([...(user.exclude ?? []), ...(generated?.exclude ?? [])]);
+  const dependencies = [...include].filter((dependency) => exclude.has(dependency)).sort();
+
+  if (dependencies.length === 0) return [];
+
+  return [
+    {
+      code: 'MF-VITE-OPTIMIZE-DEPS-CONFLICT',
+      dependencies,
+    },
+  ];
 }
